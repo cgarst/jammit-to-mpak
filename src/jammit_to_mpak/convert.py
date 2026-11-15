@@ -229,10 +229,17 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
     song = _song(jcf, manifest_recs[0]["sources"][0]["durationMs"] if manifest_recs else None, report)
     manifest = {"format": "mpak", "version": 1, "generator": {"name": "jammit-to-mpak", "version": __version__},
                 "song": song, "scores": manifest_scores, "recordings": manifest_recs}
-    with MpakWriter(out) as z:
-        z.add_json("manifest.json", manifest, indent=2)
-        for name, path, store in entries:
-            z.add_file(name, path, store)
+    # Written beside the target and renamed, so an interrupted run never leaves a half-written .mpak that a
+    # later run would mistake for a finished one.
+    part = out.with_name(out.name + ".part")
+    try:
+        with MpakWriter(part) as z:
+            z.add_json("manifest.json", manifest, indent=2)
+            for name, path, store in entries:
+                z.add_file(name, path, store)
+        part.replace(out)
+    finally:
+        part.unlink(missing_ok=True)
     return report
 
 

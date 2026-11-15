@@ -18,7 +18,11 @@ def _find_inputs(folder: Path) -> list[Path]:
     return sorted(found)
 
 
-def _convert_one(src: Path, output: Path | None, outdir: Path, used: set[Path], args) -> int:
+SKIPPED = 2
+
+
+def _convert_one(src: Path, output: Path | None, outdir: Path, used: set[Path], args, skip_existing: bool = False) -> int:
+    """0 converted, 1 failed, SKIPPED when its .mpak already exists (only if `skip_existing`)."""
     try:
         jcf = load(src)
         if output:
@@ -28,7 +32,10 @@ def _convert_one(src: Path, output: Path | None, outdir: Path, used: set[Path], 
             if out in used:  # another instrument of the same song
                 stem = re.sub(r"(\.jcf)?\.zip$|\.jcf$", "", src.name, flags=re.I)
                 out = out.with_name(f"{out.stem} ({stem}).mpak")
-            used.add(out)
+            used.add(out)  # recorded even when skipped, so the names of later instruments stay the same
+            if skip_existing and out.exists():
+                print(f"skipped {out} (already exists)")
+                return SKIPPED
         report = convert(jcf, out, systems_per_page=args.systems_per_page, quality=args.quality)
     except (JcfError, NowlineError, AudioError, ValueError) as e:
         print(f"error: {src}: {e}", file=sys.stderr)
@@ -48,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-o", "--output", help="output file (default: '<artist> - <title>.mpak' in the current directory); with a folder of songs, the output directory")
     ap.add_argument("--systems-per-page", type=int, default=7, help="systems of music on each PDF page (default 7)")
     ap.add_argument("--quality", type=int, default=90, help="JPEG quality of the PDF pages, 1-95 (default 90)")
+    ap.add_argument("--overwrite", action="store_true", help="with a folder of songs, convert every song again instead of skipping those whose .mpak already exists")
     args = ap.parse_args(argv)
     src = Path(args.input)
     if src.is_dir() and not (src / "info.plist").is_file():
