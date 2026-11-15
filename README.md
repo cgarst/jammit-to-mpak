@@ -8,6 +8,7 @@ score along with the recording.
 pip install -e .
 jcf2mpak "Dream_Theater_Under_a_Glass_Moon_guitar.jcf.zip"          # writes "Dream Theater - Under a Glass Moon.mpak"
 jcf2mpak song_folder -o out.mpak --systems-per-page 7
+jcf2mpak ~/Jammit/songs -o ~/mpaks                                  # a folder of songs: converts every .zip and .jcf in it
 ```
 
 Needs Python 3.10+, Pillow, and `ffmpeg`/`ffprobe` on the PATH (Jammit's audio is AIFF-C IMA ADPCM, which ffmpeg decodes).
