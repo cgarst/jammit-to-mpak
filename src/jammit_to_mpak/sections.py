@@ -24,15 +24,28 @@ SECTION_TYPES: dict[int, tuple[str, str]] = {
 BOUNDARY_CODES = {0, 9}
 
 
+def _int(value, default=None):
+    """`value` as an int when it is one or a numeric string (plists may store either), else `default`."""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def convert_sections(sections: list[dict], beat_times_ms: list[int]) -> tuple[list[dict], list[str]]:
     """The Music Pack `sections` of a beat file, and warnings for what could not be placed."""
     out: list[dict] = []
     warnings: list[str] = []
-    for s in sorted(sections, key=lambda s: s.get("beat", 0)):
-        code, beat, number = s.get("type"), s.get("beat"), s.get("number", 0)
+    # Beats and codes may arrive as strings; unreadable beats sort first and are reported below.
+    for s in sorted(sections, key=lambda s: _int(s.get("beat"), -1)):
+        code, beat, number = _int(s.get("type"), s.get("type")), _int(s.get("beat")), _int(s.get("number"), 0)
         if code in BOUNDARY_CODES:
             continue
-        if not isinstance(beat, int) or not 0 <= beat < len(beat_times_ms):
+        if beat is None or not 0 <= beat < len(beat_times_ms):
             warnings.append(f"section type {code} names beat {beat}, which does not exist")
             continue
         name, kind = SECTION_TYPES.get(code, (f"Section {code}", None))
