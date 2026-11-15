@@ -64,11 +64,15 @@ def main(argv: list[str] | None = None) -> int:
             outdir = Path(args.output) if args.output else Path(".")
             outdir.mkdir(parents=True, exist_ok=True)
             used: set[Path] = set()
-            failed = 0
+            failed = skipped = 0
             for i, item in enumerate(inputs, 1):
                 print(f"[{i}/{len(inputs)}] {item}")
-                failed += _convert_one(item, None, outdir, used, args)
-            print(f"\n{len(inputs) - failed} converted, {failed} failed")
+                result = _convert_one(item, None, outdir, used, args, skip_existing=not args.overwrite)
+                if result == SKIPPED:
+                    skipped += 1
+                else:
+                    failed += result
+            print(f"\n{len(inputs) - failed - skipped} converted, {skipped} skipped, {failed} failed")
             return 1 if failed else 0
     return _convert_one(src, Path(args.output) if args.output else None, Path("."), set(), args)
 
