@@ -1,4 +1,5 @@
 import json
+import plistlib
 import shutil
 import zipfile
 from pathlib import Path
@@ -6,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from jammit_to_mpak.audio import mix_level_db
+from jammit_to_mpak.catalog import ALL_PARTS, expected_parts
 from jammit_to_mpak.cli import main
 from jammit_to_mpak.convert import convert
 from jammit_to_mpak.jcf import load, peek_info
@@ -98,3 +100,38 @@ def test_cli_with_every_part(tmp_path):
     assert [f.name for f in (tmp_path / "o").glob("*.mpak")] == ["Test Artist - Test Song (stems).mpak"]
     assert main([str(songs / "bass.jcf.zip"), "--stem", "-o", str(tmp_path / "one.mpak")]) == 0  # any part finds the rest
     assert (tmp_path / "one.mpak").exists()
+
+
+def test_catalog_expected_parts():
+    assert expected_parts("311", "Beautiful Disaster") == ["guitar", "bass", "drums", "vocals"]
+    assert expected_parts("  billy   joel ", "HONESTY") == ["keys", "vocals"]
+    assert expected_parts("Unlisted Artist", "Unlisted Song") == ALL_PARTS
+
+
+def _set_artist_title(root: Path, artist: str, title: str) -> Path:
+    info = plistlib.loads((root / "info.plist").read_bytes())
+    info["artist"], info["title"] = artist, title
+    (root / "info.plist").write_bytes(plistlib.dumps(info))
+    return root
+
+
+def test_cli_catalog_subset_parts(tmp_path, capsys):
+    songs = tmp_path / "songs"
+    songs.mkdir()
+    # 4-part song (no keys)
+    for p in ("guitar", "bass", "drums", "vocals"):
+        d = _set_artist_title(make_part(tmp_path / f"bd_{p}", p), "311", "Beautiful Disaster")
+        zip_dir(d, songs / f"bd_{p}.jcf.zip")
+    # 2-part song without guitar (keys + vocals)
+    for p in ("keys", "vocals"):
+        d = _set_artist_title(make_part(tmp_path / f"hon_{p}", p), "Billy Joel", "Honesty")
+        zip_dir(d, songs / f"hon_{p}.jcf.zip")
+
+    assert main([str(songs), "--stem", "-o", str(tmp_path / "out")]) == 0
+    names = sorted(f.name for f in (tmp_path / "out").glob("*.mpak"))
+    assert names == ["311 - Beautiful Disaster (stems).mpak", "Billy Joel - Honesty (stems).mpak"]
+
+    # Missing an expected part (vocals) from a catalog song still fails in single-song mode
+    (songs / "hon_vocals.jcf.zip").unlink()
+    assert main([str(songs / "hon_keys.jcf.zip"), "--stem", "-o", str(tmp_path / "fail.mpak")]) == 1
+    assert "missing vocals" in capsys.readouterr().err

@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .audio import AUDIO_FORMATS, AudioError
+from .catalog import ALL_PARTS, expected_parts
 from .convert import INSTRUMENTS, convert
 from .jcf import JcfError, load, peek_info
 from .nowline import NowlineError
@@ -21,7 +22,9 @@ def _find_inputs(folder: Path) -> list[Path]:
 SKIPPED = 2
 
 
-PARTS = [INSTRUMENTS[i] for i in sorted(INSTRUMENTS)]  # guitar, bass, drums, keys, vocals
+def _song_key(info: dict) -> tuple[str, str]:
+    return (" ".join(str(info.get("artist", "")).split()).lower(),
+            " ".join(str(info.get("title", "")).split()).lower())
 
 
 def _song_groups(inputs: list[Path]) -> dict[tuple[str, str], dict[str, Path]]:
@@ -32,20 +35,23 @@ def _song_groups(inputs: list[Path]) -> dict[tuple[str, str], dict[str, Path]]:
         part = INSTRUMENTS.get(info.get("instrument")) if info and isinstance(info.get("instrument"), int) else None
         if not info or not part:
             continue
-        key = (str(info.get("artist", "")).strip().lower(), str(info.get("title", "")).strip().lower())
-        groups.setdefault(key, {}).setdefault(part, item)
+        groups.setdefault(_song_key(info), {}).setdefault(part, item)
     return groups
 
 
 def _convert_stems(parts: dict[str, Path], output: Path | None, outdir: Path, args, skip_existing: bool = False) -> int:
     """One song from the zips of all its parts, as stems. Same return codes as `_convert_one`."""
-    missing = [p for p in PARTS if p not in parts]
     if not parts:
         print("error: not a Jammit song folder (no instrument in its info.plist)", file=sys.stderr)
         return 1
     try:
-        primary = load(parts["guitar"]) if "guitar" in parts else load(next(iter(parts.values())))
-        label = f"{primary.info.get('artist', 'Unknown')} - {primary.info.get('title', 'Untitled')}"
+        primary_part = next((p for p in ALL_PARTS if p in parts), next(iter(parts)))
+        primary = load(parts[primary_part])
+        artist = str(primary.info.get("artist", ""))
+        title = str(primary.info.get("title", ""))
+        label = f"{artist or 'Unknown'} - {title or 'Untitled'}"
+        expected = expected_parts(artist, title)
+        missing = [p for p in expected if p not in parts]
         if missing:
             raise ValueError(f"{label}: --stem needs the zip of every part; missing {', '.join(missing)}")
         out = output or outdir / (re.sub(r'[\\/:*?"<>|]+', "_", label) + " (stems).mpak")
@@ -53,15 +59,15 @@ def _convert_stems(parts: dict[str, Path], output: Path | None, outdir: Path, ar
             print(f"skipped {out} (already exists)")
             return SKIPPED
         report = convert(primary, out, systems_per_page=args.systems_per_page, quality=args.quality,
-                         companions=[load(parts[p]) for p in PARTS if p != "guitar"],
+                         companions=[load(parts[p]) for p in expected if p != primary_part],
                          audio_format=args.format)
     except (JcfError, NowlineError, AudioError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     print(f"wrote {out}")
-    for title, lines in (("carried", report.carried), ("not carried", report.dropped), ("warnings", report.warnings)):
+    for title_line, lines in (("carried", report.carried), ("not carried", report.dropped), ("warnings", report.warnings)):
         if lines:
-            print(f"\n{title}:")
+            print(f"\n{title_line}:")
             for line in lines:
                 print(f"  {line}")
     return 0
@@ -73,12 +79,15 @@ def _main_stems(args, src: Path) -> int:
         outdir = Path(args.output) if args.output else Path(".")
         outdir.mkdir(parents=True, exist_ok=True)
         done = skipped = failed = 0
-        for i, parts in enumerate(groups.values(), 1):
-            if any(p not in parts for p in PARTS):
+        for i, ((artist, title), parts) in enumerate(groups.items(), 1):
+            expected = expected_parts(artist, title)
+            missing = [p for p in expected if p not in parts]
+            if missing:
                 skipped += 1
-                print(f"skipped {next(iter(parts.values())).name}: missing {', '.join(p for p in PARTS if p not in parts)}")
+                print(f"skipped {next(iter(parts.values())).name}: missing {', '.join(missing)}")
                 continue
-            print(f"[{i}/{len(groups)}] {parts['guitar']}")
+            first_part = next(p for p in expected if p in parts)
+            print(f"[{i}/{len(groups)}] {parts[first_part]}")
             result = _convert_stems(parts, None, outdir, args, skip_existing=not args.overwrite)
             done += result == 0
             skipped += result == SKIPPED
@@ -90,7 +99,7 @@ def _main_stems(args, src: Path) -> int:
     if not info:
         print(f"error: {src}: not a Jammit song folder", file=sys.stderr)
         return 1
-    key = (str(info.get("artist", "")).strip().lower(), str(info.get("title", "")).strip().lower())
+    key = _song_key(info)
     siblings = _find_inputs(src.resolve().parent)
     parts = _song_groups([src.resolve()] + [p for p in siblings if p != src.resolve()]).get(key, {})
     return _convert_stems(parts, Path(args.output) if args.output else None, Path("."), args)
