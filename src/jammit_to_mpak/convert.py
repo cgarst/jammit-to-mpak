@@ -23,7 +23,8 @@ from .sections import convert_sections
 
 INSTRUMENTS = {0: "guitar", 1: "bass", 2: "drums", 3: "keys", 4: "vocals"}
 KIND_NAME = {"n": "Score", "t": "Tablature"}
-PLACEHOLDER_STRINGS = {"C-1"}  # tuning.plist pads the string list with this
+PITCH_NAME = re.compile(r"[A-G][#b]?(-?[0-9])?")  # the manifest schema's tuning entry
+PLACEHOLDER_STRINGS = {"C-1", ""}  # tuning.plist pads the string list with these
 
 
 @dataclass
@@ -52,6 +53,8 @@ def _tuning(jcf: Jcf, track: Track, instrument: str | None) -> list[str] | None:
     strings = [s for s in strings if isinstance(s, str)]
     while strings and strings[-1] in PLACEHOLDER_STRINGS:
         strings.pop()
+    if not all(PITCH_NAME.fullmatch(x) for x in strings):
+        return None  # the schema allows only pitch names; omit the informational tuning rather than write an invalid pack
     return strings or None
 
 

@@ -158,3 +158,13 @@ def test_m4a_format_via_cli(tmp_path):
             assert data[4:8] == b"ftyp"
             assert hashlib.sha256(data).hexdigest() == src["sha256"]
             assert z.getinfo(src["path"]).compress_type == zipfile.ZIP_STORED
+
+
+def test_tuning_padding_and_invalid_names():
+    from types import SimpleNamespace as NS
+    from jammit_to_mpak.convert import _tuning
+    tr = NS(title="Guitar 1")
+    mk = lambda l: NS(tuning={"notes": {"guitar": {"track1": l}}})
+    assert _tuning(mk(["E", "A", "D", "G", "B", "E", ""]), tr, "guitar") == ["E", "A", "D", "G", "B", "E"]
+    assert _tuning(mk(["E", "A", "D", "G", "B", "E", "C-1", ""]), tr, "guitar") == ["E", "A", "D", "G", "B", "E"]
+    assert _tuning(mk(["E", "?", "D"]), tr, "guitar") is None
