@@ -21,7 +21,7 @@ Needs Python 3.10+, Pillow, and `ffmpeg`/`ffprobe` on the PATH (Jammit's audio i
 | `nowline.nodes` | a `pdf` sync file for each score: every beat gets a page and an `x`, `y` position |
 | `beats.plist` | the recording's beat file (`beats/<recording>.json`), with downbeats |
 | `sections.plist` | `sections` in the beat file, named from the section codes |
-| `<id>_jcfx` (audio) | FLAC; an instrument track becomes a `stem`, "Band" the `backing` recording, with `without` listing the stems it lacks |
+| `<id>_jcfx` (audio) | FLAC; an instrument track becomes a `stem`, "Band" the `backing` recording, with `without` listing the stems it lacks. The FLAC is written with 4096-sample blocks: smaller ones (under 256) are valid but macOS WebKit, and so Safari and the MajesticTab desktop app, cannot decode them |
 | `info.plist` | `song`: title, artist, album, genre, publisher (`publishedBy`), composer (`writtenBy`), year (`copyright`) |
 | `tuning.plist` | `instruments` (tuning) on the score |
 

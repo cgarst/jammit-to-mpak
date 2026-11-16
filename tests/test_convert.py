@@ -105,3 +105,14 @@ def test_validates_against_the_specification_reference_tool(packed):
     _, _, _, out = packed
     run = subprocess.run([node, str(Path(spec) / "reference/js/bin/mpak.js"), "validate", str(out)], capture_output=True, text=True)
     assert run.returncode == 0 and "0 warnings" in run.stdout, run.stdout + run.stderr
+
+
+def test_flac_block_size_is_one_webkit_can_decode(packed):
+    # Blocks under 256 samples are valid FLAC, but macOS WebKit cannot decode them (see audio.py)
+    z, _, _, _ = packed
+    for name in (n for n in z.namelist() if n.endswith(".flac")):
+        data = z.read(name)
+        # fLaC, then the STREAMINFO header (4 bytes), then the minimum and maximum block size as 16-bit numbers
+        assert data[:4] == b"fLaC"
+        low, high = int.from_bytes(data[8:10], "big"), int.from_bytes(data[10:12], "big")
+        assert low == high == 4096, f"{name}: block sizes {low}..{high}"
