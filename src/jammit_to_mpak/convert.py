@@ -115,7 +115,8 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
             strips = jcf.strips(tr.identifier, kind)
             if not strips:
                 continue
-            label = f"{tr.title} ({KIND_NAME[kind]})"
+            song_title = str(jcf.info.get("title") or "").strip()
+            label = f"{song_title} - {tr.title} ({KIND_NAME[kind]})" if song_title else f"{tr.title} ({KIND_NAME[kind]})"
             sid = slug(f"{tr.title} {KIND_NAME[kind]}", used_ids)
             node_track = nowline.get((tr.title, KIND_NAME[kind] if kind == "n" else "Tablature"))
             systems = None
