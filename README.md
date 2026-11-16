@@ -44,9 +44,10 @@ song are matched by artist and title in `info.plist`. The tool refuses a song th
 folder of songs it skips it, and says what is missing). The score and the cursor are the guitar folder's, and the pack
 is written as `<artist> - <title> (stems).mpak`.
 
-The run measures how much of the guitar folder's full mix (its Band plus its stems) the stems do not carry, and warns
-when that is within 20 dB of the mix. Jammit's audio is lossy, so a few tens of dB below the mix is the codec's own noise;
-more means a part (percussion, strings, effects) that no group has. Nothing is subtracted from any audio.
+The run measures how much of the guitar folder's full mix (its Band plus its stems) the stems do not carry. Jammit's
+audio is lossy, so a few tens of dB below the mix is the codec's own noise; when the remainder is within 20 dB of the
+mix (a part such as percussion, strings, or effects that no group has), it renders `Band - other stems` as an `Other`
+stem (`instrument: "other"`) so all stems together still sum to the full mix.
 
 ## How the cursor data works
 

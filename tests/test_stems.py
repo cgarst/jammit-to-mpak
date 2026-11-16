@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from jammit_to_mpak.audio import mix_level_db
 from jammit_to_mpak.cli import main
 from jammit_to_mpak.convert import convert
 from jammit_to_mpak.jcf import load, peek_info
@@ -50,11 +51,28 @@ def test_stem_pack(tmp_path):
     assert not [w for w in report.warnings if "leave out" in w]  # the stems add up to the Band's mix
 
 
-def test_stems_that_miss_part_of_the_mix_warn(tmp_path):
+def test_stems_that_miss_part_of_the_mix_recover_other(tmp_path):
     folders = {p: load(make_part(tmp_path / p, p, band_tones=[330, 440, 550, 660, 880])) for p in PARTS}
-    report = convert(folders["guitar"], tmp_path / "o.mpak", systems_per_page=4, work=tmp_path / "w",
+    out = tmp_path / "o.mpak"
+    report = convert(folders["guitar"], out, systems_per_page=4, work=tmp_path / "w",
                      companions=[folders[p] for p in PARTS if p != "guitar"])
-    assert any("leave out part of the mix" in w for w in report.warnings)
+    assert not [w for w in report.warnings if "leave out" in w]
+    assert any("recording 'Other'" in line for line in report.carried)
+    with zipfile.ZipFile(out) as zf:
+        m = json.loads(zf.read("manifest.json"))
+        recs = m["recordings"]
+        assert [r["id"] for r in recs] == ["guitar-1", "bass", "drums", "keys", "vocal", "other"]
+        assert recs[-1]["stem"] == {"instrument": "other"} and recs[-1]["syncFrom"] == "guitar-1"
+        extracted = tmp_path / "ex"
+        zf.extractall(extracted)
+    stems = [(extracted / r["sources"][0]["path"], 1.0) for r in recs]
+    guitar = folders["guitar"]
+    band = next(t for t in guitar.tracks if t.title == "Band")
+    g1 = next(t for t in guitar.tracks if t.title == "Guitar 1")
+    full = mix_level_db([(guitar.audio(band.identifier), 1.0), (guitar.audio(g1.identifier), 1.0)])
+    diff = mix_level_db([(guitar.audio(band.identifier), 1.0), (guitar.audio(g1.identifier), 1.0)]
+                        + [(p, -1.0) for p, _ in stems])
+    assert diff - full < -20
 
 
 def test_cli_needs_every_part(tmp_path, capsys):

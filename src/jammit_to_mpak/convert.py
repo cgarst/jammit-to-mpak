@@ -15,7 +15,7 @@ from typing import Sequence
 from pathlib import Path
 
 from . import __version__
-from .audio import duration_ms, mix_level_db, to_flac
+from .audio import duration_ms, mix_level_db, render_mix_flac, to_flac
 from .jcf import Jcf, Track
 from .mpak_writer import MpakWriter, derived_pack_id, sha256_file
 from .notation import DEFAULT_INTERVAL, build_pdf
@@ -206,7 +206,19 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
         if t.cls != "JMFileTrack":
             report.dropped.append(f"track '{t.title}' ({t.cls}): not an audio file in the folder")
     if stem_mode:
-        _check_companions(jcf, companions, report)
+        residual = _check_companions(jcf, companions, report)
+        if residual:
+            parts, level_diff = residual
+            rid = slug("Other", set(rec_ids.values()) | used_ids)
+            flac = work / f"{rid}.flac"
+            render_mix_flac(parts, flac)
+            src = {"type": "file", "path": f"audio/{rid}.flac", "mime": "audio/flac",
+                   "durationMs": duration_ms(flac), "sha256": sha256_file(flac), "size": flac.stat().st_size}
+            entries.append((src["path"], flac, True))
+            stems.append({"id": rid, "role": "stem", "label": "Other", "sources": [src],
+                          "stem": {"instrument": "other"}})
+            report.carried.append(f"recording 'Other' (stem, recovered {level_diff:.1f} dB below the mix), "
+                                  f"{src['durationMs'] / 1000:.1f} s")
     for backing in backings:
         if stems:
             backing["without"] = [s["id"] for s in stems]
@@ -283,8 +295,9 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
     return report
 
 
-def _check_companions(jcf: Jcf, companions: list[Jcf], report: Report) -> None:
-    """Checks that the other folders match the primary one, and how much of its mix the stems cover."""
+def _check_companions(jcf: Jcf, companions: list[Jcf], report: Report) -> tuple[list[tuple[Path, float]], float] | None:
+    """Checks that the other folders match the primary one, and how much of its mix the stems cover.
+    Returns `(residual_parts, gap_minus_full_db)` when the stems leave out part of the mix (> -20 dB)."""
     for c in companions:
         name = instrument_of(c) or "other"
         report.dropped.append(f"{name} folder: notation, cursor data and Band track (its stems stand in for the Band)")
@@ -295,21 +308,23 @@ def _check_companions(jcf: Jcf, companions: list[Jcf], report: Report) -> None:
     band = next((t for t in jcf.tracks if t.cls == "JMFileTrack" and t.title.strip().lower() == "band"
                  and jcf.audio(t.identifier)), None)
     if not band:
-        return
+        return None
     mine = [t for t in jcf.tracks if t.cls == "JMFileTrack" and jcf.audio(t.identifier) and t is not band]
     others = [(c.audio(t.identifier), -1.0) for c in companions for t in c.tracks
               if t.cls == "JMFileTrack" and c.audio(t.identifier) and t.title.strip().lower() != "band"]
+    residual_parts = [(jcf.audio(band.identifier), 1.0)] + others
     try:
         full = mix_level_db([(jcf.audio(band.identifier), 1.0)] + [(jcf.audio(t.identifier), 1.0) for t in mine])
-        gap = mix_level_db([(jcf.audio(band.identifier), 1.0)] + others)
+        gap = mix_level_db(residual_parts)
     except Exception as e:  # a failed measurement must not fail the conversion
         report.warnings.append(f"could not check that the stems cover the mix: {e}")
-        return
+        return None
+    diff = gap - full
     report.carried.append(f"stems against the {instrument_of(jcf) or 'primary'} folder's full mix: "
-                          f"what no stem carries is {gap - full:.1f} dB below it")
-    if gap - full > -20:
-        report.warnings.append("the stems leave out part of the mix (percussion, strings or effects that no instrument "
-                               "folder has?): the full mix will not sound like the original")
+                          f"what no stem carries is {diff:.1f} dB below it")
+    if diff > -20:
+        return residual_parts, diff
+    return None
 
 
 def _same_ghost(jcf: Jcf) -> bool:

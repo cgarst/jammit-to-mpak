@@ -51,21 +51,36 @@ def duration_ms(path: Path) -> int:
         raise AudioError(f"ffprobe could not read the length of {path.name}") from e
 
 
-def mix_level_db(parts: list[tuple[Path, float]]) -> float:
-    """The RMS level in dB (ffmpeg `volumedetect`) of the sum of the files, each times its gain. A gain of -1 takes a
-    file out of the sum, which is how the part of one mix that another lacks is measured. (`amix` ignores a negative
-    weight, so the inversion is a `volume` filter.)"""
-    cmd = [_need("ffmpeg"), "-hide_banner", "-nostats"]
-    chains = []
+def _mix_graph(parts: list[tuple[Path, float]]) -> tuple[list[str], str]:
+    """Input flags and filter_complex graph summing `parts` (`(path, gain)`). Negative gain inverts phase;
+    `amix` ignores negative weights, so inversion uses a `volume` filter."""
+    inputs: list[str] = []
+    chains: list[str] = []
     for i, (path, gain) in enumerate(parts):
-        cmd += ["-i", str(path)]
+        inputs += ["-i", str(path)]
         chains.append(f"[{i}:a]aformat=sample_fmts=fltp:channel_layouts=stereo,aresample=44100"
                       f"{',volume=-1' if gain < 0 else ''}[a{i}]")
     labels = "".join(f"[a{i}]" for i in range(len(parts)))
-    cmd += ["-filter_complex", ";".join(chains) + f";{labels}amix=inputs={len(parts)}:normalize=0,volumedetect",
-            "-f", "null", "-"]
+    return inputs, ";".join(chains) + f";{labels}amix=inputs={len(parts)}:normalize=0"
+
+
+def mix_level_db(parts: list[tuple[Path, float]]) -> float:
+    """The RMS level in dB (ffmpeg `volumedetect`) of the sum of the files, each times its gain."""
+    inputs, graph = _mix_graph(parts)
+    cmd = [_need("ffmpeg"), "-hide_banner", "-nostats", *inputs,
+           "-filter_complex", f"{graph},volumedetect", "-f", "null", "-"]
     run = subprocess.run(cmd, capture_output=True, text=True)
     m = re.search(r"mean_volume:\s*(-?[\d.]+|-inf) dB", run.stderr)
     if run.returncode != 0 or not m:
         raise AudioError(f"ffmpeg could not measure the mix: {run.stderr.strip()[-300:]}")
     return float(m.group(1))
+
+
+def render_mix_flac(parts: list[tuple[Path, float]], dst: Path) -> None:
+    """Renders the sum of `parts` (each `(path, gain)`) as a FLAC file with `FLAC_BLOCK_SIZE`."""
+    inputs, graph = _mix_graph(parts)
+    cmd = [_need("ffmpeg"), "-v", "error", "-y", *inputs, "-filter_complex", graph,
+           "-map_metadata", "-1", "-c:a", "flac", "-frame_size", str(FLAC_BLOCK_SIZE), str(dst)]
+    run = subprocess.run(cmd, capture_output=True, text=True)
+    if run.returncode != 0:
+        raise AudioError(f"ffmpeg could not render residual mix {dst.name}: {run.stderr.strip()}")
