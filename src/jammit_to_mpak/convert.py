@@ -16,7 +16,7 @@ from pathlib import Path
 from . import __version__
 from .audio import duration_ms, to_flac
 from .jcf import Jcf, Track
-from .mpak_writer import MpakWriter, sha256_file
+from .mpak_writer import MpakWriter, derived_pack_id, sha256_file
 from .notation import DEFAULT_INTERVAL, build_pdf
 from .sections import convert_sections
 
@@ -228,7 +228,10 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
 
     # --- write ------------------------------------------------------------------------------------------------
     song = _song(jcf, manifest_recs[0]["sources"][0]["durationMs"] if manifest_recs else None, report)
-    manifest = {"format": "mpak", "version": 1, "generator": {"name": "jammit-to-mpak", "version": __version__},
+    # The pack id (SPEC section 4, "Pack identity"): derived from the primary score, so converting the same file again
+    # makes the same id.
+    manifest = {"format": "mpak", "version": 1, "id": derived_pack_id(manifest_scores[0]["sha256"]),
+                "generator": {"name": "jammit-to-mpak", "version": __version__},
                 "song": song, "scores": manifest_scores, "recordings": manifest_recs}
     # Written beside the target and renamed, so an interrupted run never leaves a half-written .mpak that a
     # later run would mistake for a finished one.

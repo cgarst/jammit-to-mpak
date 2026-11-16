@@ -3,11 +3,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 import zipfile
 from pathlib import Path
 
 _DATE = (1980, 1, 1, 0, 0, 0)  # fixed, so the same input gives the same file
 _CHUNK = 1 << 20
+
+
+# The namespace of the derived pack id (SPEC section 4, "Pack identity").
+PACK_ID_NAMESPACE = uuid.UUID("03924935-9520-4f8c-91cd-ebd5f6cf57c5")
+
+
+def derived_pack_id(score_sha256: str) -> str:
+    """The UUID version 5 of the primary score's SHA-256 (64 lowercase hex characters) in the spec namespace, so that
+    converting the same file again, or another tool deriving an id for the same score, gives the same id."""
+    return str(uuid.uuid5(PACK_ID_NAMESPACE, score_sha256.lower()))
 
 
 def sha256_file(path: Path) -> str:

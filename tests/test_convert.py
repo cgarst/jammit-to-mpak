@@ -10,6 +10,7 @@ import pytest
 
 from jammit_to_mpak.convert import convert
 from jammit_to_mpak.jcf import load
+from jammit_to_mpak.mpak_writer import derived_pack_id
 from fixtures import make_jcf
 
 pytestmark = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
@@ -36,6 +37,7 @@ def test_layout_and_order(packed):
 def test_song_and_scores(packed):
     _, m, _, _ = packed
     assert m["format"] == "mpak" and m["version"] == 1
+    assert m["id"] == derived_pack_id(m["scores"][0]["sha256"])  # SPEC section 4: the same file gives the same id
     assert m["song"] == {"title": "Test Song", "artist": "Test Artist", "album": "Test Album", "genre": "Rock",
                          "publisher": "Pub", "composer": "Writer", "year": 1999, "length": 2000}
     assert [s["id"] for s in m["scores"]] == ["guitar-1-tablature", "guitar-1-score"]
@@ -116,3 +118,8 @@ def test_flac_block_size_is_one_webkit_can_decode(packed):
         assert data[:4] == b"fLaC"
         low, high = int.from_bytes(data[8:10], "big"), int.from_bytes(data[10:12], "big")
         assert low == high == 4096, f"{name}: block sizes {low}..{high}"
+
+
+def test_derived_pack_id_matches_the_spec_vector():
+    assert derived_pack_id("0" * 64) == "8980d354-7334-5de0-8804-bb35580aea65"
+    assert derived_pack_id("A" * 64) == derived_pack_id("a" * 64)
