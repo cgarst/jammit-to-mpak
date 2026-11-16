@@ -11,10 +11,11 @@ from __future__ import annotations
 import re
 import tempfile
 from dataclasses import dataclass, field
+from typing import Sequence
 from pathlib import Path
 
 from . import __version__
-from .audio import duration_ms, to_flac
+from .audio import duration_ms, mix_level_db, to_flac
 from .jcf import Jcf, Track
 from .mpak_writer import MpakWriter, derived_pack_id, sha256_file
 from .notation import DEFAULT_INTERVAL, build_pdf
@@ -74,7 +75,16 @@ def _song(jcf: Jcf, length_ms: int | None, report: Report) -> dict:
     return song
 
 
-def convert(jcf: Jcf, out: Path, systems_per_page: int = 7, quality: int = 90, work: Path | None = None) -> Report:
+def instrument_of(jcf: Jcf) -> str | None:
+    v = jcf.info.get("instrument")
+    return INSTRUMENTS.get(v) if isinstance(v, int) else None
+
+
+def convert(jcf: Jcf, out: Path, systems_per_page: int = 7, quality: int = 90, work: Path | None = None,
+            companions: Sequence[Jcf] = ()) -> Report:
+    """`companions` are the folders of the other instruments of the same song. With any, the pack holds the stems of
+    every folder (the score and the cursor are the primary folder's) and no Band track: the full mix and every
+    mix without a part is the stems played together."""
     report = Report(warnings=list(jcf.warnings))
     work_ctx = None
     if work is None:
@@ -82,14 +92,15 @@ def convert(jcf: Jcf, out: Path, systems_per_page: int = 7, quality: int = 90, w
         work = Path(work_ctx.name)
     work.mkdir(parents=True, exist_ok=True)
     try:
-        return _convert(jcf, out, systems_per_page, quality, work, report)
+        return _convert(jcf, out, systems_per_page, quality, work, report, list(companions))
     finally:
         if work_ctx:
             work_ctx.cleanup()
 
 
-def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, report: Report) -> Report:
-    instrument = INSTRUMENTS.get(jcf.info.get("instrument")) if isinstance(jcf.info.get("instrument"), int) else None
+def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, report: Report,
+             companions: list[Jcf]) -> Report:
+    instrument = instrument_of(jcf)
     beats = jcf.beats
     if not beats:
         report.warnings.append("no beats.plist: the file has no beat grid and no sync")
@@ -156,26 +167,46 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
     # --- recordings -------------------------------------------------------------------------------------------
     stems, backings = [], []
     rec_ids: dict[str, str] = {}
-    audio_tracks = [t for t in jcf.tracks if t.cls == "JMFileTrack" and jcf.audio(t.identifier)]
-    for tr in audio_tracks:
+    stem_mode = bool(companions)
+    # (folder, track, is a stem). A folder's Band track is a backing recording, unless the stems are all there is.
+    wanted: list[tuple[Jcf, Track, bool]] = []
+    for folder in [jcf, *companions]:
+        notated = {t.identifier for t in folder.tracks if folder.strips(t.identifier, "n")}
+        for tr in folder.tracks:
+            if tr.cls != "JMFileTrack" or not folder.audio(tr.identifier):
+                continue
+            if stem_mode:
+                if tr.title.strip().lower() != "band":
+                    wanted.append((folder, tr, True))
+            else:
+                wanted.append((folder, tr, tr.identifier in notated))
+    first_ms = None
+    for folder, tr, is_stem in wanted:
         rid = slug(tr.title, set(rec_ids.values()) | used_ids)
         rec_ids[tr.identifier] = rid
         flac = work / f"{rid}.flac"
-        to_flac(jcf.audio(tr.identifier), flac)
+        to_flac(folder.audio(tr.identifier), flac)
         src = {"type": "file", "path": f"audio/{rid}.flac", "mime": "audio/flac",
                "durationMs": duration_ms(flac), "sha256": sha256_file(flac), "size": flac.stat().st_size}
         entries.append((src["path"], flac, True))
-        is_stem = tr in notation_tracks
         rec = {"id": rid, "role": "stem" if is_stem else "backing", "label": tr.title, "sources": [src]}
         if is_stem:
-            rec["stem"] = {"instrument": instrument or "other"}
+            has_notes = bool(folder.strips(tr.identifier, "n"))
+            rec["stem"] = {"instrument": (instrument_of(folder) if has_notes else None) or "other"}
             stems.append(rec)
         else:
             backings.append(rec)
         report.carried.append(f"recording '{tr.title}' ({rec['role']}), {src['durationMs'] / 1000:.1f} s")
+        if first_ms is None:
+            first_ms = src["durationMs"]
+        elif is_stem and stem_mode and abs(src["durationMs"] - first_ms) > 50:
+            report.warnings.append(f"'{tr.title}' is {src['durationMs'] / 1000:.2f} s, the first stem {first_ms / 1000:.2f} s: "
+                                   "the stems may not line up")
     for t in jcf.tracks:
         if t.cls != "JMFileTrack":
             report.dropped.append(f"track '{t.title}' ({t.cls}): not an audio file in the folder")
+    if stem_mode:
+        _check_companions(jcf, companions, report)
     for backing in backings:
         if stems:
             backing["without"] = [s["id"] for s in stems]
@@ -250,6 +281,35 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
     finally:
         part.unlink(missing_ok=True)
     return report
+
+
+def _check_companions(jcf: Jcf, companions: list[Jcf], report: Report) -> None:
+    """Checks that the other folders match the primary one, and how much of its mix the stems cover."""
+    for c in companions:
+        name = instrument_of(c) or "other"
+        report.dropped.append(f"{name} folder: notation, cursor data and Band track (its stems stand in for the Band)")
+        same = len(c.beats) == len(jcf.beats) and all(
+            abs(a["position"] - b["position"]) < 0.002 for a, b in zip(c.beats, jcf.beats))
+        if not same:
+            report.warnings.append(f"the {name} folder's beats differ from the primary folder's: its stems may not line up")
+    band = next((t for t in jcf.tracks if t.cls == "JMFileTrack" and t.title.strip().lower() == "band"
+                 and jcf.audio(t.identifier)), None)
+    if not band:
+        return
+    mine = [t for t in jcf.tracks if t.cls == "JMFileTrack" and jcf.audio(t.identifier) and t is not band]
+    others = [(c.audio(t.identifier), -1.0) for c in companions for t in c.tracks
+              if t.cls == "JMFileTrack" and c.audio(t.identifier) and t.title.strip().lower() != "band"]
+    try:
+        full = mix_level_db([(jcf.audio(band.identifier), 1.0)] + [(jcf.audio(t.identifier), 1.0) for t in mine])
+        gap = mix_level_db([(jcf.audio(band.identifier), 1.0)] + others)
+    except Exception as e:  # a failed measurement must not fail the conversion
+        report.warnings.append(f"could not check that the stems cover the mix: {e}")
+        return
+    report.carried.append(f"stems against the {instrument_of(jcf) or 'primary'} folder's full mix: "
+                          f"what no stem carries is {gap - full:.1f} dB below it")
+    if gap - full > -20:
+        report.warnings.append("the stems leave out part of the mix (percussion, strings or effects that no instrument "
+                               "folder has?): the full mix will not sound like the original")
 
 
 def _same_ghost(jcf: Jcf) -> bool:

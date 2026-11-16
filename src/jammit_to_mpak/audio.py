@@ -9,6 +9,7 @@ the pack must not carry such files. No WebKit bug documenting this was found.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -48,3 +49,23 @@ def duration_ms(path: Path) -> int:
         return round(float(run.stdout.strip()) * 1000)
     except ValueError as e:
         raise AudioError(f"ffprobe could not read the length of {path.name}") from e
+
+
+def mix_level_db(parts: list[tuple[Path, float]]) -> float:
+    """The RMS level in dB (ffmpeg `volumedetect`) of the sum of the files, each times its gain. A gain of -1 takes a
+    file out of the sum, which is how the part of one mix that another lacks is measured. (`amix` ignores a negative
+    weight, so the inversion is a `volume` filter.)"""
+    cmd = [_need("ffmpeg"), "-hide_banner", "-nostats"]
+    chains = []
+    for i, (path, gain) in enumerate(parts):
+        cmd += ["-i", str(path)]
+        chains.append(f"[{i}:a]aformat=sample_fmts=fltp:channel_layouts=stereo,aresample=44100"
+                      f"{',volume=-1' if gain < 0 else ''}[a{i}]")
+    labels = "".join(f"[a{i}]" for i in range(len(parts)))
+    cmd += ["-filter_complex", ";".join(chains) + f";{labels}amix=inputs={len(parts)}:normalize=0,volumedetect",
+            "-f", "null", "-"]
+    run = subprocess.run(cmd, capture_output=True, text=True)
+    m = re.search(r"mean_volume:\s*(-?[\d.]+|-inf) dB", run.stderr)
+    if run.returncode != 0 or not m:
+        raise AudioError(f"ffmpeg could not measure the mix: {run.stderr.strip()[-300:]}")
+    return float(m.group(1))

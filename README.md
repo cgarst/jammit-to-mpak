@@ -30,6 +30,24 @@ Needs Python 3.10+, Pillow, and `ffmpeg`/`ffprobe` on the PATH (Jammit's audio i
 The run prints what it carried, what it left out (cover art, amp settings, `skillLevel`, `sku`, and so on, none of
 which has a place in the specification), and any warnings.
 
+## Stems from every part (`--stem`)
+
+```
+jcf2mpak ~/Jammit/songs --stem -o ~/mpaks                     # every song whose five zips are all in the folder
+jcf2mpak Another_Day_guitar.jcf.zip --stem                    # the other four are looked up beside it
+```
+
+By default a pack holds one instrument group: its stems, and the Band track (the song without them). With `--stem` the
+pack is built from the stems of all five groups (guitar, bass, drums, keys, vocals) and has no Band track, so a reader
+can play the stems together as the full mix, or leave out any of them (no guitar, no vocals, neither). The zips of a
+song are matched by artist and title in `info.plist`. The tool refuses a song that lacks any of the five zips (in a
+folder of songs it skips it, and says what is missing). The score and the cursor are the guitar folder's, and the pack
+is written as `<artist> - <title> (stems).mpak`.
+
+The run measures how much of the guitar folder's full mix (its Band plus its stems) the stems do not carry, and warns
+when that is within 20 dB of the mix. Jammit's audio is lossy, so a few tens of dB below the mix is the codec's own noise;
+more means a part (percussion, strings, effects) that no group has. Nothing is subtracted from any audio.
+
 ## How the cursor data works
 
 `nowline.nodes` (not documented anywhere; read from real files and checked against the rendered notation) holds, for each
@@ -42,7 +60,7 @@ Section codes were read off the titles printed in the notation of real songs; un
 
 ## Limits
 
-- One song folder is one instrument group (guitar, bass, drums, keys or vocals). Folders of the same song are not merged.
+- One song folder is one instrument group (guitar, bass, drums, keys or vocals). Folders of the same song are merged only with `--stem`.
 - The click and the user track are not files in the folder, so they are not written.
 - Audio offsets that other tools hard-code for a few songs are not applied.
 

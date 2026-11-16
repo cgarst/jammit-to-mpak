@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import plistlib
+import math
 import struct
 import wave
 from pathlib import Path
@@ -31,7 +32,19 @@ def beat_nodes(count_in: int = 2, per_system: int = 4):
     return nodes
 
 
-def make_jcf(root: Path, *, count_in: int = 2, with_nowline: bool = True, audio: bool = True) -> Path:
+def write_tone(path: Path, freqs: list[float], seconds: float = 2.0) -> None:
+    """A WAV (named as a Jammit audio file) of sines, 0.1 of full scale each; no frequencies is silence."""
+    n = int(44100 * seconds)
+    frames = b"".join(
+        struct.pack("<hh", *(2 * [int(3276 * sum(math.sin(2 * math.pi * f * i / 44100) for f in freqs))])) for i in range(n))
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(2), w.setsampwidth(2), w.setframerate(44100)
+        w.writeframes(frames)
+
+
+def make_jcf(root: Path, *, count_in: int = 2, with_nowline: bool = True, audio: bool = True,
+             instrument: int = 0, title: str = "Guitar 1", ids: dict[str, str] | None = None) -> Path:
+    IDS = ids or globals()["IDS"]
     root.mkdir(parents=True, exist_ok=True)
     nodes = beat_nodes(count_in)
     n_beats = len(nodes)
@@ -43,10 +56,10 @@ def make_jcf(root: Path, *, count_in: int = 2, with_nowline: bool = True, audio:
         {"beat": count_in + 8, "number": 1, "type": 2}, {"beat": n_beats - 1, "number": 0, "type": 9}]))
     (root / "info.plist").write_bytes(plistlib.dumps({
         "title": "Test Song", "artist": "Test Artist", "album": "Test Album", "genre": "Rock", "copyright": "1999",
-        "publishedBy": "Pub", "writtenBy": "Writer", "courtesyOf": "Somebody", "instrument": 0, "bpm": "120",
+        "publishedBy": "Pub", "writtenBy": "Writer", "courtesyOf": "Somebody", "instrument": instrument, "bpm": "120",
         "countInBeats": count_in, "sku": "X", "skillLevel": {"guitar": 3}}))
     (root / "tracks.plist").write_bytes(plistlib.dumps([
-        {"class": "JMFileTrack", "identifier": IDS["g1"], "title": "Guitar 1", "scoreSystemInterval": INTERVAL,
+        {"class": "JMFileTrack", "identifier": IDS["g1"], "title": title, "scoreSystemInterval": INTERVAL,
          "scoreSystemHeight": INTERVAL + 9},
         {"class": "JMFileTrack", "identifier": IDS["band"], "title": "Band", "scoreSystemInterval": 0, "scoreSystemHeight": 0},
         {"class": "JMClickTrack", "identifier": "CCCCCCCC-0000-0000-0000-000000000003", "title": "Click"}]))
@@ -62,7 +75,7 @@ def make_jcf(root: Path, *, count_in: int = 2, with_nowline: bool = True, audio:
             img.save(root / f"{IDS['g1']}_jcf{kind}_{i:02d}", "PNG")
     if with_nowline:
         (root / "nowline.nodes").write_bytes(nowline_bytes([
-            ("Guitar 1", "Score", nodes), ("Guitar 1", "Tablature", nodes)]))
+            (title, "Score", nodes), (title, "Tablature", nodes)]))
     if audio:
         for ident in IDS.values():
             with wave.open(str(root / f"{ident}_jcfx"), "wb") as w:

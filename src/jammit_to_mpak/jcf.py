@@ -86,6 +86,23 @@ def _plist(root: Path, name: str, required: bool = True):
         raise JcfError(f"{name} is not a readable property list: {e}") from e
 
 
+def peek_info(path: str | Path) -> dict | None:
+    """The info.plist of a song folder or zip, read without extracting the rest. None when there is none."""
+    path = Path(path)
+    try:
+        if path.is_file() and zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as zf:
+                names = [n for n in zf.namelist() if n.rsplit("/", 1)[-1] == "info.plist"]
+                info = plistlib.loads(zf.read(names[0])) if len(names) == 1 else None
+        elif path.is_dir():
+            info = _plist(_find_root(path), "info.plist")
+        else:
+            return None
+    except (JcfError, plistlib.InvalidFileException, zipfile.BadZipFile, ValueError, OSError):
+        return None
+    return info if isinstance(info, dict) else None
+
+
 def load(path: str | Path, workdir: Path | None = None) -> Jcf:
     """Opens a folder, or a zip (extracted under `workdir`, or a temporary directory that lives until exit)."""
     path = Path(path)
