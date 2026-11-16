@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from jammit_to_mpak.cli import main
 from jammit_to_mpak.convert import convert
 from jammit_to_mpak.jcf import load
 from jammit_to_mpak.mpak_writer import derived_pack_id
@@ -139,3 +140,21 @@ def test_sizes_and_entries_are_true(packed):
     for path, info in m["entries"].items():
         data = z.read(path)
         assert info == {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def test_m4a_format_via_cli(tmp_path):
+    jcf_dir = make_jcf(tmp_path / "song")
+    out = tmp_path / "out.mpak"
+    assert main([str(jcf_dir), "-o", str(out), "--format", "m4a"]) == 0
+    with zipfile.ZipFile(out) as z:
+        m = json.loads(z.read("manifest.json"))
+        names = set(z.namelist())
+        assert {"audio/band.m4a", "audio/guitar-1.m4a"} <= names
+        for r in m["recordings"]:
+            src = r["sources"][0]
+            assert src["mime"] == "audio/mp4"
+            assert src["path"].endswith(".m4a")
+            data = z.read(src["path"])
+            assert data[4:8] == b"ftyp"
+            assert hashlib.sha256(data).hexdigest() == src["sha256"]
+            assert z.getinfo(src["path"]).compress_type == zipfile.ZIP_STORED

@@ -29,11 +29,23 @@ def _need(tool: str) -> str:
 # The FLAC default for 44.1 kHz audio. Anything from 256 up plays in WebKit; see the module note.
 FLAC_BLOCK_SIZE = 4096
 
+AUDIO_FORMATS: dict[str, tuple[str, list[str]]] = {
+    "flac": ("audio/flac", ["-c:a", "flac", "-frame_size", str(FLAC_BLOCK_SIZE)]),
+    "m4a": ("audio/mp4", ["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"]),
+}
 
-def to_flac(src: Path, dst: Path) -> None:
+
+def _format_spec(fmt: str) -> tuple[str, list[str]]:
+    if fmt not in AUDIO_FORMATS:
+        raise ValueError(f"unsupported audio format {fmt!r}; expected one of {', '.join(AUDIO_FORMATS)}")
+    return AUDIO_FORMATS[fmt]
+
+
+def convert_audio(src: Path, dst: Path, fmt: str = "flac") -> None:
+    """Transcodes `src` to `dst` in `fmt` (`flac` or `m4a`)."""
+    _, codec_args = _format_spec(fmt)
     run = subprocess.run(
-        [_need("ffmpeg"), "-v", "error", "-y", "-i", str(src), "-map_metadata", "-1",
-         "-c:a", "flac", "-frame_size", str(FLAC_BLOCK_SIZE), str(dst)],
+        [_need("ffmpeg"), "-v", "error", "-y", "-i", str(src), "-map_metadata", "-1", *codec_args, str(dst)],
         capture_output=True, text=True,
     )
     if run.returncode != 0:
@@ -76,11 +88,12 @@ def mix_level_db(parts: list[tuple[Path, float]]) -> float:
     return float(m.group(1))
 
 
-def render_mix_flac(parts: list[tuple[Path, float]], dst: Path) -> None:
-    """Renders the sum of `parts` (each `(path, gain)`) as a FLAC file with `FLAC_BLOCK_SIZE`."""
+def render_mix(parts: list[tuple[Path, float]], dst: Path, fmt: str = "flac") -> None:
+    """Renders the sum of `parts` (each `(path, gain)`) to `dst` in `fmt` (`flac` or `m4a`)."""
+    _, codec_args = _format_spec(fmt)
     inputs, graph = _mix_graph(parts)
     cmd = [_need("ffmpeg"), "-v", "error", "-y", *inputs, "-filter_complex", graph,
-           "-map_metadata", "-1", "-c:a", "flac", "-frame_size", str(FLAC_BLOCK_SIZE), str(dst)]
+           "-map_metadata", "-1", *codec_args, str(dst)]
     run = subprocess.run(cmd, capture_output=True, text=True)
     if run.returncode != 0:
         raise AudioError(f"ffmpeg could not render residual mix {dst.name}: {run.stderr.strip()}")

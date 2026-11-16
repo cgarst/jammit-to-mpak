@@ -5,7 +5,7 @@ import re
 import sys
 from pathlib import Path
 
-from .audio import AudioError
+from .audio import AUDIO_FORMATS, AudioError
 from .convert import INSTRUMENTS, convert
 from .jcf import JcfError, load, peek_info
 from .nowline import NowlineError
@@ -53,7 +53,8 @@ def _convert_stems(parts: dict[str, Path], output: Path | None, outdir: Path, ar
             print(f"skipped {out} (already exists)")
             return SKIPPED
         report = convert(primary, out, systems_per_page=args.systems_per_page, quality=args.quality,
-                         companions=[load(parts[p]) for p in PARTS if p != "guitar"])
+                         companions=[load(parts[p]) for p in PARTS if p != "guitar"],
+                         audio_format=args.format)
     except (JcfError, NowlineError, AudioError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -110,7 +111,8 @@ def _convert_one(src: Path, output: Path | None, outdir: Path, used: set[Path], 
             if skip_existing and out.exists():
                 print(f"skipped {out} (already exists)")
                 return SKIPPED
-        report = convert(jcf, out, systems_per_page=args.systems_per_page, quality=args.quality)
+        report = convert(jcf, out, systems_per_page=args.systems_per_page, quality=args.quality,
+                         audio_format=args.format)
     except (JcfError, NowlineError, AudioError, ValueError) as e:
         print(f"error: {src}: {e}", file=sys.stderr)
         return 1
@@ -129,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-o", "--output", help="output file (default: '<artist> - <title>.mpak' in the current directory); with a folder of songs, the output directory")
     ap.add_argument("--systems-per-page", type=int, default=7, help="systems of music on each PDF page (default 7)")
     ap.add_argument("--quality", type=int, default=90, help="JPEG quality of the PDF pages, 1-95 (default 90)")
+    ap.add_argument("--format", choices=sorted(AUDIO_FORMATS), default="flac", help="audio format for recordings: flac (lossless) or m4a (AAC, smaller) (default flac)")
     ap.add_argument("--overwrite", action="store_true", help="with a folder of songs, convert every song again instead of skipping those whose .mpak already exists")
     ap.add_argument("--stem", action="store_true", help="build the pack from the stems of every part (guitar, bass, drums, keys and vocals) instead of the Band track, so a reader can play any mix of them. Needs the zip of every part of the song, in the folder given or beside the zip given")
     args = ap.parse_args(argv)

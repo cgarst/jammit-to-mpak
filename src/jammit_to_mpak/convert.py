@@ -15,7 +15,7 @@ from typing import Sequence
 from pathlib import Path
 
 from . import __version__
-from .audio import duration_ms, mix_level_db, render_mix_flac, to_flac
+from .audio import AUDIO_FORMATS, convert_audio, duration_ms, mix_level_db, render_mix
 from .jcf import Jcf, Track
 from .mpak_writer import MpakWriter, derived_pack_id, sha256_file
 from .notation import DEFAULT_INTERVAL, build_pdf
@@ -81,10 +81,12 @@ def instrument_of(jcf: Jcf) -> str | None:
 
 
 def convert(jcf: Jcf, out: Path, systems_per_page: int = 7, quality: int = 90, work: Path | None = None,
-            companions: Sequence[Jcf] = ()) -> Report:
+            companions: Sequence[Jcf] = (), audio_format: str = "flac") -> Report:
     """`companions` are the folders of the other instruments of the same song. With any, the pack holds the stems of
     every folder (the score and the cursor are the primary folder's) and no Band track: the full mix and every
     mix without a part is the stems played together."""
+    if audio_format not in AUDIO_FORMATS:
+        raise ValueError(f"unsupported audio format {audio_format!r}; expected one of {', '.join(AUDIO_FORMATS)}")
     report = Report(warnings=list(jcf.warnings))
     work_ctx = None
     if work is None:
@@ -92,14 +94,14 @@ def convert(jcf: Jcf, out: Path, systems_per_page: int = 7, quality: int = 90, w
         work = Path(work_ctx.name)
     work.mkdir(parents=True, exist_ok=True)
     try:
-        return _convert(jcf, out, systems_per_page, quality, work, report, list(companions))
+        return _convert(jcf, out, systems_per_page, quality, work, report, list(companions), audio_format)
     finally:
         if work_ctx:
             work_ctx.cleanup()
 
 
 def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, report: Report,
-             companions: list[Jcf]) -> Report:
+             companions: list[Jcf], audio_format: str) -> Report:
     instrument = instrument_of(jcf)
     beats = jcf.beats
     if not beats:
@@ -180,15 +182,21 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
                     wanted.append((folder, tr, True))
             else:
                 wanted.append((folder, tr, tr.identifier in notated))
+    mime, _ = AUDIO_FORMATS[audio_format]
+
+    def _add_audio(rid: str, audio_file: Path) -> dict:
+        src = {"type": "file", "path": f"audio/{rid}.{audio_format}", "mime": mime,
+               "durationMs": duration_ms(audio_file), "sha256": sha256_file(audio_file), "size": audio_file.stat().st_size}
+        entries.append((src["path"], audio_file, True))
+        return src
+
     first_ms = None
     for folder, tr, is_stem in wanted:
         rid = slug(tr.title, set(rec_ids.values()) | used_ids)
         rec_ids[tr.identifier] = rid
-        flac = work / f"{rid}.flac"
-        to_flac(folder.audio(tr.identifier), flac)
-        src = {"type": "file", "path": f"audio/{rid}.flac", "mime": "audio/flac",
-               "durationMs": duration_ms(flac), "sha256": sha256_file(flac), "size": flac.stat().st_size}
-        entries.append((src["path"], flac, True))
+        audio_file = work / f"{rid}.{audio_format}"
+        convert_audio(folder.audio(tr.identifier), audio_file, audio_format)
+        src = _add_audio(rid, audio_file)
         rec = {"id": rid, "role": "stem" if is_stem else "backing", "label": tr.title, "sources": [src]}
         if is_stem:
             has_notes = bool(folder.strips(tr.identifier, "n"))
@@ -210,11 +218,9 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
         if residual:
             parts, level_diff = residual
             rid = slug("Other", set(rec_ids.values()) | used_ids)
-            flac = work / f"{rid}.flac"
-            render_mix_flac(parts, flac)
-            src = {"type": "file", "path": f"audio/{rid}.flac", "mime": "audio/flac",
-                   "durationMs": duration_ms(flac), "sha256": sha256_file(flac), "size": flac.stat().st_size}
-            entries.append((src["path"], flac, True))
+            audio_file = work / f"{rid}.{audio_format}"
+            render_mix(parts, audio_file, audio_format)
+            src = _add_audio(rid, audio_file)
             stems.append({"id": rid, "role": "stem", "label": "Other", "sources": [src],
                           "stem": {"instrument": "other"}})
             report.carried.append(f"recording 'Other' (stem, recovered {level_diff:.1f} dB below the mix), "
