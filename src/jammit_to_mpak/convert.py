@@ -99,6 +99,7 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
         times.append(t if not times or t > times[-1] else times[-1] + 1)
 
     entries: list[tuple[str, Path, bool]] = []  # (archive name, file, store)
+    integrity: dict[str, dict] = {}  # sync and beat file -> {size, sha256}, for the manifest's `entries`
     manifest_scores: list[dict] = []
     manifest_recs: list[dict] = []
     sync_files: dict[str, dict] = {}  # score id -> sync doc (recording filled in below)
@@ -126,7 +127,7 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
             pdf = work / f"{sid}.pdf"
             geo = build_pdf(strips, pdf, interval, systems, per_page, quality)
             entry = {"id": sid, "label": label, "path": f"score/{sid}.pdf", "format": "pdf",
-                     "sha256": sha256_file(pdf), "name": f"{sid}.pdf", "pages": geo.pages}
+                     "sha256": sha256_file(pdf), "size": pdf.stat().st_size, "name": f"{sid}.pdf", "pages": geo.pages}
             strings = _tuning(jcf, tr, instrument)
             if strings:
                 entry["instruments"] = [{"name": tr.title, "tuning": strings}]
@@ -162,7 +163,7 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
         flac = work / f"{rid}.flac"
         to_flac(jcf.audio(tr.identifier), flac)
         src = {"type": "file", "path": f"audio/{rid}.flac", "mime": "audio/flac",
-               "durationMs": duration_ms(flac), "sha256": sha256_file(flac)}
+               "durationMs": duration_ms(flac), "sha256": sha256_file(flac), "size": flac.stat().st_size}
         entries.append((src["path"], flac, True))
         is_stem = tr in notation_tracks
         rec = {"id": rid, "role": "stem" if is_stem else "backing", "label": tr.title, "sources": [src]}
@@ -198,6 +199,7 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
             beat_path = work / "beats.json"
             beat_path.write_text(__import__("json").dumps(doc, separators=(",", ":")), encoding="utf-8")
             entries.append((f"beats/{root['id']}.json", beat_path, False))
+            integrity[f"beats/{root['id']}.json"] = {"size": beat_path.stat().st_size, "sha256": sha256_file(beat_path)}
             root["beats"] = f"beats/{root['id']}.json"
             report.carried.append(f"beats: {len(times)} beats, {sum(1 for b in beats if b.get('isDownbeat'))} downbeats, "
                                   f"{len(secs)} sections")
@@ -208,6 +210,7 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
             path.write_text(__import__("json").dumps(doc, separators=(",", ":")), encoding="utf-8")
             name = f"sync/{root['id']}-{sid}.json"
             entries.append((name, path, False))
+            integrity[name] = {"size": path.stat().st_size, "sha256": sha256_file(path)}
             root_sync[sid] = name
         if root_sync:
             root["sync"] = root_sync
@@ -233,6 +236,8 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
     manifest = {"format": "mpak", "version": 1, "id": derived_pack_id(manifest_scores[0]["sha256"]),
                 "generator": {"name": "jammit-to-mpak", "version": __version__},
                 "song": song, "scores": manifest_scores, "recordings": manifest_recs}
+    if integrity:  # the size and hash of the sync and beat files (SPEC section 4, "Integrity")
+        manifest["entries"] = integrity
     # Written beside the target and renamed, so an interrupted run never leaves a half-written .mpak that a
     # later run would mistake for a finished one.
     part = out.with_name(out.name + ".part")

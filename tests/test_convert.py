@@ -123,3 +123,19 @@ def test_flac_block_size_is_one_webkit_can_decode(packed):
 def test_derived_pack_id_matches_the_spec_vector():
     assert derived_pack_id("0" * 64) == "8980d354-7334-5de0-8804-bb35580aea65"
     assert derived_pack_id("A" * 64) == derived_pack_id("a" * 64)
+
+
+def test_sizes_and_entries_are_true(packed):
+    """SPEC section 4, "Integrity": size on scores and audio, entries for the sync and beat files."""
+    z, m, _, _ = packed
+    for s in m["scores"]:
+        assert s["size"] == len(z.read(s["path"]))
+    for r in m["recordings"]:
+        for src in r["sources"]:
+            if src["type"] == "file":
+                assert src["size"] == z.getinfo(src["path"]).file_size
+    paths = {p for r in m["recordings"] for p in [*r.get("sync", {}).values(), r.get("beats")] if p}
+    assert paths and set(m["entries"]) == paths
+    for path, info in m["entries"].items():
+        data = z.read(path)
+        assert info == {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
