@@ -10,13 +10,14 @@ readme = "README.md"
 license = "MPL-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-dependencies = ["Pillow>=10"]
+dependencies = ["Pillow>=10", "pypdf>=4"]
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
 
 [project.scripts]
 jcf2mpak = "jammit_to_mpak.cli:main"
+mpak-join = "jammit_to_mpak.join_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
