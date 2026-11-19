@@ -23,6 +23,7 @@ from .sections import convert_sections
 
 INSTRUMENTS = {0: "guitar", 1: "bass", 2: "drums", 3: "keys", 4: "vocals"}
 KIND_NAME = {"n": "Score", "t": "Tablature"}
+ORIGIN = "Jammit"  # SPEC section 6.4: scores with the same origin are one set a reader can show as one entry
 PITCH_NAME = re.compile(r"[A-G][#b]?(-?[0-9])?")  # the manifest schema's tuning entry
 PLACEHOLDER_STRINGS = {"C-1", ""}  # tuning.plist pads the string list with these
 
@@ -143,7 +144,8 @@ def _convert(jcf: Jcf, out: Path, per_page: int, quality: int, work: Path, repor
             pdf = work / f"{sid}.pdf"
             geo = build_pdf(strips, pdf, interval, systems, per_page, quality)
             entry = {"id": sid, "label": label, "path": f"score/{sid}.pdf", "format": "pdf",
-                     "sha256": sha256_file(pdf), "size": pdf.stat().st_size, "name": f"{sid}.pdf", "pages": geo.pages}
+                     "sha256": sha256_file(pdf), "size": pdf.stat().st_size, "name": f"{sid}.pdf", "pages": geo.pages,
+                     "origin": ORIGIN}
             strings = _tuning(jcf, tr, instrument)
             if strings:
                 entry["instruments"] = [{"name": tr.title, "tuning": strings}]

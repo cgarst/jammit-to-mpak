@@ -20,7 +20,7 @@ Needs Python 3.10+, Pillow, and `ffmpeg`/`ffprobe` on the PATH (Jammit's audio i
 
 | Jammit | Music Pack |
 |---|---|
-| `<id>_jcfn_NN`, `<id>_jcft_NN` (PNG strips) | one PDF score for each notation and tab set, built from the strips |
+| `<id>_jcfn_NN`, `<id>_jcft_NN` (PNG strips) | one PDF score for each notation and tab set, built from the strips, each with `origin` set to `Jammit`, so a reader can show the notation and tab sets of a song as one entry |
 | `nowline.nodes` | a `pdf` sync file for each score: every beat gets a page and an `x`, `y` position |
 | `beats.plist` | the recording's beat file (`beats/<recording>.json`), with downbeats |
 | `sections.plist` | `sections` in the beat file, named from the section codes |

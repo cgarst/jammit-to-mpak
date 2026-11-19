@@ -45,6 +45,7 @@ def test_song_and_scores(packed):
     s = m["scores"][0]
     assert s["format"] == "pdf" and s["pages"] == 2 and len(s["sha256"]) == 64
     assert s["instruments"] == [{"name": "Guitar 1", "tuning": ["D", "A", "D", "G", "B", "E"]}]  # the C-1 padding is gone
+    assert {x["origin"] for x in m["scores"]} == {"Jammit"}  # SPEC 6.4: one set, shown as one entry
 
 
 def test_hashes_match(packed):
